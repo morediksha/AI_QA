@@ -1,0 +1,14 @@
+dev:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: 10000
+  retries: 3
+
+staging:
+  base_url: "https://staging-api.jsonplaceholder.typicode.com"
+  timeout: 15000
+  retries: 2
+
+production:
+  base_url: "https://api.jsonplaceholder.typicode.com"
+  timeout: 20000
+  retries: 1

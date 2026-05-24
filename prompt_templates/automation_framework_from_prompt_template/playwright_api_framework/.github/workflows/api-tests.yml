@@ -1,0 +1,78 @@
+name: API Automation Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * *'  # Run daily at 2 AM UTC
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
+        test-env: ['dev', 'staging']
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run tests (Parallel)
+      env:
+        TEST_ENV: ${{ matrix.test-env }}
+      run: |
+        pytest tests/ \
+          -v \
+          -n 4 \
+          --html=reports/report.html \
+          --self-contained-html \
+          --junitxml=reports/junit.xml \
+          --alluredir=reports/allure
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-reports-${{ matrix.python-version }}-${{ matrix.test-env }}
+        path: reports/
+    
+    - name: Publish HTML Report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: html-report-${{ matrix.python-version }}-${{ matrix.test-env }}
+        path: reports/report.html
+    
+    - name: Generate Allure Report
+      if: always()
+      run: |
+        allure generate reports/allure -o allure-report --clean
+    
+    - name: Upload Allure Report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: allure-report-${{ matrix.python-version }}-${{ matrix.test-env }}
+        path: allure-report/
+    
+    - name: Test Summary
+      if: always()
+      run: |
+        echo "## Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- Environment: ${{ matrix.test-env }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Python: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

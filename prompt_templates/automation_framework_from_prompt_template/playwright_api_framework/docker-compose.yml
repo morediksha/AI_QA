@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Main test runner service
+  api-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - TEST_ENV=dev
+      - LOG_LEVEL=INFO
+      - MAX_WORKERS=4
+      - RETRY_ATTEMPTS=3
+      - RETRY_DELAY=1
+    volumes:
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    command: pytest tests/ -v -n 4 --html=reports/report.html --self-contained-html
+    networks:
+      - test-network
+    # Uncomment if using a mock API server
+    # depends_on:
+    #   - api-mock-server
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Optional: Mock API Server for testing
+  # api-mock-server:
+  #   image: mockoon/mockoon:latest
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./mockoon-config.json:/data/mockoon-config.json:ro
+  #   networks:
+  #     - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test-reports:
+    driver: local

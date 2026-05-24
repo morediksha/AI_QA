@@ -1,0 +1,164 @@
+pipeline {
+    agent any
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+    
+    parameters {
+        choice(
+            name: 'TEST_ENV',
+            choices: ['dev', 'staging', 'production'],
+            description: 'Select test environment'
+        )
+        string(
+            name: 'NUM_WORKERS',
+            defaultValue: '4',
+            description: 'Number of parallel workers'
+        )
+    }
+    
+    environment {
+        TEST_ENV = "${params.TEST_ENV}"
+        MAX_WORKERS = "${params.NUM_WORKERS}"
+        PYTHONUNBUFFERED = '1'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Checked out from ${env.GIT_URL}"
+            }
+        }
+        
+        stage('Setup') {
+            steps {
+                script {
+                    sh '''
+                        echo "Setting up Python environment..."
+                        python3 -m venv venv
+                        . venv/bin/activate
+                        pip install --upgrade pip
+                        pip install -r requirements.txt
+                        echo "Setup complete"
+                    '''
+                }
+            }
+        }
+        
+        stage('Lint') {
+            steps {
+                script {
+                    sh '''
+                        . venv/bin/activate
+                        echo "Running linting checks..."
+                        # Uncomment if you have pylint/flake8 configured
+                        # pylint tests/ --fail-under=8.0 || true
+                        echo "Lint checks completed"
+                    '''
+                }
+            }
+        }
+        
+        stage('Unit Tests') {
+            steps {
+                script {
+                    sh '''
+                        . venv/bin/activate
+                        echo "Running tests in ${TEST_ENV} environment..."
+                        pytest tests/ \
+                            -v \
+                            -n ${MAX_WORKERS} \
+                            --tb=short \
+                            --junitxml=reports/junit.xml \
+                            --html=reports/report.html \
+                            --self-contained-html \
+                            --alluredir=reports/allure \
+                            --cov=api \
+                            --cov-report=xml \
+                            --cov-report=html:reports/coverage \
+                            || true
+                    '''
+                }
+            }
+        }
+        
+        stage('Allure Report') {
+            when {
+                always()
+            }
+            steps {
+                script {
+                    sh '''
+                        if [ -d "reports/allure" ]; then
+                            . venv/bin/activate
+                            allure generate reports/allure -o allure-report --clean
+                            echo "Allure report generated"
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Publish Results') {
+            when {
+                always()
+            }
+            steps {
+                junit 'reports/junit.xml'
+                
+                publishHTML([
+                    reportDir: 'reports',
+                    reportFiles: 'report.html',
+                    reportName: 'Pytest HTML Report'
+                ])
+                
+                publishHTML([
+                    reportDir: 'allure-report',
+                    reportFiles: 'index.html',
+                    reportName: 'Allure Report'
+                ])
+                
+                publishHTML([
+                    reportDir: 'reports/coverage',
+                    reportFiles: 'index.html',
+                    reportName: 'Code Coverage Report'
+                ])
+                
+                archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'logs/**', allowEmptyArchive: true
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        
+        success {
+            echo "✅ Test execution successful in ${TEST_ENV} environment"
+        }
+        
+        failure {
+            echo "❌ Test execution failed in ${TEST_ENV} environment"
+            emailext(
+                subject: "Test Failure: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: """
+                    Build failed!
+                    
+                    Job: ${env.JOB_NAME}
+                    Build: ${env.BUILD_NUMBER}
+                    Environment: ${TEST_ENV}
+                    Status: FAILURE
+                    
+                    Check console output at ${env.BUILD_URL} to view the results.
+                """,
+                to: "${env.TEAM_EMAIL}"
+            )
+        }
+    }
+}
